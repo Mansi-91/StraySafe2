@@ -1,0 +1,36 @@
+[
+  {
+    "id": "sample-1",
+    "type": "dog",
+    "status": "found",
+    "location": "Central Park, New York",
+    "description": "Friendly golden retriever found near the playground. Wearing a red collar but no tags.",
+    "breed": "Golden Retriever",
+    "color": "Golden",
+    "size": "Large",
+    "age": "Adult",
+    "contactName": "John Smith",
+    "contactPhone": "+1234567890",
+    "contactEmail": "john.smith@example.com",
+    "image": null,
+    "dateReported": "2024-01-15T10:30:00.000Z",
+    "lastUpdated": "2024-01-15T10:30:00.000Z"
+  },
+  {
+    "id": "sample-2",
+    "type": "cat",
+    "status": "lost",
+    "location": "Downtown District, Main Street",
+    "description": "Small black and white cat, very shy. Missing since yesterday evening. Responds to 'Mittens'.",
+    "breed": "Domestic Shorthair",
+    "color": "Black and White",
+    "size": "Small",
+    "age": "Young",
+    "contactName": "Sarah Johnson",
+    "contactPhone": "+1987654321",
+    "contactEmail": "sarah.j@example.com",
+    "image": null,
+    "dateReported": "2024-01-14T18:45:00.000Z",
+    "lastUpdated": "2024-01-14T18:45:00.000Z"
+  }
+]
