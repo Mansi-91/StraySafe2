@@ -12,15 +12,24 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Create uploads directory if it doesn't exist
+// Ensure data directory exists
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Multer configuration for file uploads
+// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
@@ -31,44 +40,49 @@ const storage = multer.diskStorage({
   }
 });
 
+const fileFilter = (req, file, cb) => {
+  // Check file type
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
 const upload = multer({
   storage: storage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB limit
   },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'), false);
-    }
-  }
+  fileFilter: fileFilter
 });
 
 // Data file path
-const dataFilePath = path.join(__dirname, 'data', 'animals.json');
+const dataFile = path.join(dataDir, 'animals.json');
 
-// Helper function to read data
+// Initialize data file if it doesn't exist
+if (!fs.existsSync(dataFile)) {
+  const initialData = [];
+  fs.writeFileSync(dataFile, JSON.stringify(initialData, null, 2));
+}
+
+// Helper functions
 const readData = () => {
   try {
-    if (fs.existsSync(dataFilePath)) {
-      const data = fs.readFileSync(dataFilePath, 'utf8');
-      return JSON.parse(data);
-    }
-    return [];
+    const data = fs.readFileSync(dataFile, 'utf8');
+    return JSON.parse(data);
   } catch (error) {
-    console.error('Error reading data:', error);
+    console.error('Error reading data file:', error);
     return [];
   }
 };
 
-// Helper function to write data
 const writeData = (data) => {
   try {
-    fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2));
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
     return true;
   } catch (error) {
-    console.error('Error writing data:', error);
+    console.error('Error writing data file:', error);
     return false;
   }
 };
@@ -76,63 +90,48 @@ const writeData = (data) => {
 // Validation rules
 const animalValidation = [
   body('type').isIn(['dog', 'cat', 'other']).withMessage('Type must be dog, cat, or other'),
-  body('breed').optional().isString().trim().isLength({ min: 1, max: 100 }),
-  body('color').isString().trim().isLength({ min: 1, max: 50 }),
-  body('size').isIn(['small', 'medium', 'large']).withMessage('Size must be small, medium, or large'),
-  body('location').isString().trim().isLength({ min: 1, max: 200 }),
-  body('description').optional().isString().trim().isLength({ max: 1000 }),
-  body('contactName').isString().trim().isLength({ min: 1, max: 100 }),
-  body('contactPhone').isString().trim().matches(/^[\d\s\-\+\(\)]+$/).withMessage('Invalid phone number'),
-  body('contactEmail').isEmail().withMessage('Invalid email address'),
-  body('status').optional().isIn(['found', 'lost', 'adopted', 'reunited']).withMessage('Invalid status')
+  body('status').isIn(['found', 'lost', 'rescued']).withMessage('Status must be found, lost, or rescued'),
+  body('location').notEmpty().withMessage('Location is required'),
+  body('description').notEmpty().withMessage('Description is required'),
+  body('contactName').notEmpty().withMessage('Contact name is required'),
+  body('contactPhone').notEmpty().withMessage('Contact phone is required'),
+  body('contactEmail').isEmail().withMessage('Valid email is required')
 ];
 
 // Routes
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({
+    success: true,
+    message: 'StraySafe API is running',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Get all animals with optional filtering
 app.get('/api/animals', (req, res) => {
   try {
     let animals = readData();
-    
+    const { type, status, location } = req.query;
+
     // Apply filters
-    const { type, status, location, search } = req.query;
-    
     if (type) {
       animals = animals.filter(animal => animal.type === type);
     }
-    
     if (status) {
       animals = animals.filter(animal => animal.status === status);
     }
-    
     if (location) {
       animals = animals.filter(animal => 
         animal.location.toLowerCase().includes(location.toLowerCase())
       );
     }
-    
-    if (search) {
-      const searchTerm = search.toLowerCase();
-      animals = animals.filter(animal => 
-        animal.breed?.toLowerCase().includes(searchTerm) ||
-        animal.color.toLowerCase().includes(searchTerm) ||
-        animal.description?.toLowerCase().includes(searchTerm) ||
-        animal.location.toLowerCase().includes(searchTerm)
-      );
-    }
-    
-    // Sort by date (newest first)
-    animals.sort((a, b) => new Date(b.dateReported) - new Date(a.dateReported));
-    
+
     res.json({
       success: true,
       data: animals,
-      count: animals.length
+      total: animals.length
     });
   } catch (error) {
     res.status(500).json({
@@ -148,14 +147,14 @@ app.get('/api/animals/:id', (req, res) => {
   try {
     const animals = readData();
     const animal = animals.find(a => a.id === req.params.id);
-    
+
     if (!animal) {
       return res.status(404).json({
         success: false,
         message: 'Animal not found'
       });
     }
-    
+
     res.json({
       success: true,
       data: animal
@@ -170,36 +169,37 @@ app.get('/api/animals/:id', (req, res) => {
 });
 
 // Create new animal report
-app.post('/api/animals', upload.single('photo'), animalValidation, (req, res) => {
+app.post('/api/animals', upload.single('image'), animalValidation, (req, res) => {
   try {
     // Check validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
+        message: 'Validation failed',
         errors: errors.array()
       });
     }
-    
+
     const animals = readData();
-    
     const newAnimal = {
       id: uuidv4(),
       type: req.body.type,
-      breed: req.body.breed || '',
-      color: req.body.color,
-      size: req.body.size,
+      status: req.body.status,
       location: req.body.location,
-      description: req.body.description || '',
+      description: req.body.description,
+      breed: req.body.breed || '',
+      color: req.body.color || '',
+      size: req.body.size || '',
+      age: req.body.age || '',
       contactName: req.body.contactName,
       contactPhone: req.body.contactPhone,
       contactEmail: req.body.contactEmail,
-      status: req.body.status || 'found',
-      dateReported: new Date().toISOString(),
-      photo: req.file ? `/uploads/${req.file.filename}` : null
+      image: req.file ? `/uploads/${req.file.filename}` : null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
-    
+
     animals.push(newAnimal);
     
     if (writeData(animals)) {
@@ -224,49 +224,52 @@ app.post('/api/animals', upload.single('photo'), animalValidation, (req, res) =>
 });
 
 // Update animal report
-app.put('/api/animals/:id', upload.single('photo'), animalValidation, (req, res) => {
+app.put('/api/animals/:id', upload.single('image'), animalValidation, (req, res) => {
   try {
+    // Check validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
+        message: 'Validation failed',
         errors: errors.array()
       });
     }
-    
+
     const animals = readData();
     const animalIndex = animals.findIndex(a => a.id === req.params.id);
-    
+
     if (animalIndex === -1) {
       return res.status(404).json({
         success: false,
         message: 'Animal not found'
       });
     }
-    
+
+    // Update animal data
     const updatedAnimal = {
       ...animals[animalIndex],
       type: req.body.type,
-      breed: req.body.breed || '',
-      color: req.body.color,
-      size: req.body.size,
+      status: req.body.status,
       location: req.body.location,
-      description: req.body.description || '',
+      description: req.body.description,
+      breed: req.body.breed || '',
+      color: req.body.color || '',
+      size: req.body.size || '',
+      age: req.body.age || '',
       contactName: req.body.contactName,
       contactPhone: req.body.contactPhone,
       contactEmail: req.body.contactEmail,
-      status: req.body.status || animals[animalIndex].status,
-      lastUpdated: new Date().toISOString()
+      updatedAt: new Date().toISOString()
     };
-    
-    // Update photo if new one is uploaded
+
+    // Update image if new one is uploaded
     if (req.file) {
-      updatedAnimal.photo = `/uploads/${req.file.filename}`;
+      updatedAnimal.image = `/uploads/${req.file.filename}`;
     }
-    
+
     animals[animalIndex] = updatedAnimal;
-    
+
     if (writeData(animals)) {
       res.json({
         success: true,
@@ -303,21 +306,13 @@ app.get('/api/stats', (req, res) => {
       byStatus: {
         found: animals.filter(a => a.status === 'found').length,
         lost: animals.filter(a => a.status === 'lost').length,
-        adopted: animals.filter(a => a.status === 'adopted').length,
-        reunited: animals.filter(a => a.status === 'reunited').length
+        rescued: animals.filter(a => a.status === 'rescued').length
       },
       recentReports: animals
-        .sort((a, b) => new Date(b.dateReported) - new Date(a.dateReported))
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 5)
-        .map(animal => ({
-          id: animal.id,
-          type: animal.type,
-          location: animal.location,
-          dateReported: animal.dateReported,
-          status: animal.status
-        }))
     };
-    
+
     res.json({
       success: true,
       data: stats
@@ -344,7 +339,7 @@ app.use((error, req, res, next) => {
   
   res.status(500).json({
     success: false,
-    message: 'Internal server error',
+    message: 'Something went wrong!',
     error: error.message
   });
 });
@@ -359,9 +354,9 @@ app.use('*', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 StraySafe Backend Server running on port ${PORT}`);
+  console.log(`🚀 StraySafe API server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`🐕 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`🐕 Animals API: http://localhost:${PORT}/api/animals`);
 });
 
 module.exports = app;
